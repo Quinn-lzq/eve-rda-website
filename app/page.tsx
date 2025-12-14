@@ -1,15 +1,11 @@
 // app/page.tsx
-import Header from "@/components/Header";
+import AuthButton from "@/components/AuthButton"; // 这里不需要花括号 {}
 
 export default function Home() {
   return (
-    // 设置全局深色背景，模拟 EVE 网站的风格
-    <main className="min-h-screen bg-gray-900 text-white">
-      <Header />
-      <div className="p-4 md:p-8">
-        <h2 className="text-2xl font-bold text-blue-400 mb-4">欢迎加入资源开发管理总署！！</h2>
-        {/* 首页内容区域 */}
-      </div>
+    <main className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center">
+      <h1 className="text-4xl font-bold mb-8 text-blue-400">EVE RDA System</h1>
+      <AuthButton />
     </main>
   );
 }
