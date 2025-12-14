@@ -1,30 +1,17 @@
-// components/AuthButton.tsx
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { generateCodeChallenge, generateCodeVerifier, generateRandomString } from '@/utils/pkce-helpers'; 
-// 👇 修改这里：导入 createClient
 import { createClient } from '@/utils/supabase/client';
 
-// 你的 EVE Scope 列表 (保持你之前改好的)
 const EVE_SCOPES = 'esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-assets.read_assets.v1 esi-location.read_location.v1 esi-location.read_ship_type.v1';
 
-export default function AuthButton() {
-    const [user, setUser] = useState<any>(null);
+// 接收一个 size 属性，决定按钮大小
+export default function AuthButton({ size = 'normal', isLogged = false }: { size?: 'normal' | 'large', isLogged?: boolean }) {
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
-    // 👇 修改这里：使用 createClient()
     const supabase = createClient();
-
-    // 检查登录状态
-    useEffect(() => {
-        const getUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            setUser(user);
-        };
-        getUser();
-    }, [supabase]);
 
     const handleEveLogin = async () => {
         setIsLoading(true);
@@ -59,49 +46,37 @@ export default function AuthButton() {
     };
 
     const handleSignOut = async () => {
+        setIsLoading(true);
         await supabase.auth.signOut();
-        setUser(null);
-        router.refresh();
+        router.refresh(); // 刷新页面以更新状态
+        setIsLoading(false);
     };
 
-    if (user) {
-        // 防止 user_metadata 为空导致的崩溃
-        const charName = user.user_metadata?.character_name || 'Unknown Pilot';
-        const charId = user.user_metadata?.character_id;
-
+    // 如果已登录，显示注销按钮
+    if (isLogged) {
         return (
-            <div className="flex items-center gap-4 bg-gray-800 p-2 rounded-lg border border-gray-700 shadow-lg">
-                {charId && (
-                    <img 
-                        src={`https://images.evetech.net/characters/${charId}/portrait?size=64`} 
-                        alt={charName}
-                        className="w-10 h-10 rounded-full border border-gray-500"
-                    />
-                )}
-                <div className="text-sm">
-                    <p className="font-bold text-blue-300">{charName}</p>
-                    <button 
-                        onClick={handleSignOut} 
-                        className="text-xs text-red-400 hover:text-red-200 transition"
-                    >
-                        注销
-                    </button>
-                </div>
-            </div>
+            <button
+                onClick={handleSignOut}
+                disabled={isLoading}
+                className="px-6 py-2 border border-red-500/50 text-red-400 hover:bg-red-500/10 rounded transition uppercase tracking-widest text-sm font-bold"
+            >
+                {isLoading ? '注销中...' : '安全登出 / LOGOUT'}
+            </button>
         );
     }
+
+    // 未登录，显示登录按钮
+    const sizeClasses = size === 'large' 
+        ? 'py-4 px-10 text-lg shadow-blue-500/20 shadow-2xl scale-110' 
+        : 'py-2 px-6 text-sm';
 
     return (
         <button
             onClick={handleEveLogin}
             disabled={isLoading}
-            className={`py-2 px-6 rounded-md font-semibold text-white transition duration-150 ${
-                isLoading 
-                ? 'bg-gray-600 cursor-wait' 
-                : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-blue-500/50'
-            }`}
+            className={`${sizeClasses} rounded bg-blue-600 hover:bg-blue-500 text-white font-bold transition transform hover:scale-105 active:scale-95 duration-200`}
         >
-            {isLoading ? '跳转中...' : 'EVE SSO 登录'}
+            {isLoading ? '正在跳转 EVE SSO...' : 'EVE ONLINE 登录'}
         </button>
     );
 };

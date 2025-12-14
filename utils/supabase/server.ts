@@ -1,8 +1,9 @@
+// utils/supabase/server.ts
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function createClient() {
-  const cookieStore = await cookies()
+  const cookieStore = await cookies() // 👈 Next.js 15 必须加 await
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,8 +19,7 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             )
           } catch {
-            // 在 Server Components 中有时无法写入 cookie (例如渲染过程), 
-            // 这通常是可以忽略的，除非是在 Server Action 中。
+            // 在 Server Components 中只能读取，不能写入 (这是正常的)
           }
         },
       },
