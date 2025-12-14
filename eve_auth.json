@@ -1,0 +1,11 @@
+{
+  "name": "eve_online",
+  "type": "oidc",
+  "url": "https://login.eveonline.com/oauth/authorize",
+  "token_url": "https://login.eveonline.com/oauth/token",
+  "userinfo_url": "https://login.eveonline.com/oauth/verify",
+  "client_id": "af5a9e0e0d3c46f29c7ba473f9147378",
+  "client_secret_env": "EVE_SECRET_KEY",
+  "scopes": "publicData esi-characters.read_corporation_history.v1",
+  "redirect_uri": "https://icilcsgpdowijpgsjcan.supabase.co/auth/v1/callback"
+}
