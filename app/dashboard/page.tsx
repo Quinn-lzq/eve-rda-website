@@ -1,8 +1,10 @@
 // app/dashboard/page.tsx
 import { createClient } from "@/utils/supabase/server";
+import Link from "next/link"; // 👈 记得导入 Link
 import { 
-  refreshAccessToken, getCharacterWallet, getCharacterSkills, 
-  getCharacterLocation, getCharacterShip, resolveNames,
+  refreshAccessToken, 
+  getCharacterWallet, getCharacterSkills, getCharacterLocation, getCharacterShip,
+  getSkillQueue, getWalletJournal, resolveNames,
   formatISK, formatNumber 
 } from "@/utils/eve-api";
 
@@ -12,189 +14,203 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 模拟数据 (防止没登录时报错，方便你看效果)
-  const charName = user?.user_metadata?.character_name || "Unknown Pilot";
-  const charId = user?.user_metadata?.character_id || 1;
+  if (!user) return <div>Please Log In</div>;
+
+  const charName = user.user_metadata.character_name;
+  const charId = user.user_metadata.character_id;
+  const refreshToken = user.user_metadata.eve_refresh_token;
+
+  // 默认数据
   let walletBalance = 0;
   let totalSP = 0;
-  let shipName = "Capsule";
-  let locationName = "Jita";
-  let errorMsg = "";
+  let locationName = "N/A";
+  let shipName = "N/A";
+  let shipTypeId = 670;
+  let activeSkillName = "无训练中技能";
+  let skillProgress = 0;
+  let skillEndTime = "";
+  let recentTransactions: any[] = [];
 
-  // 尝试获取真实数据
   try {
-      if (user?.user_metadata?.eve_refresh_token) {
-          const token = await refreshAccessToken(user.user_metadata.eve_refresh_token);
-          const [w, s, l, sh] = await Promise.all([
-              getCharacterWallet(charId, token),
-              getCharacterSkills(charId, token),
-              getCharacterLocation(charId, token),
-              getCharacterShip(charId, token)
-          ]);
-          walletBalance = w;
-          totalSP = s || 0;
-          if (l || sh) {
-              const names = await resolveNames([l, sh?.ship_type_id].filter(Boolean));
-              locationName = names[l] || locationName;
-              shipName = names[sh?.ship_type_id] || shipName;
-          }
+    if (refreshToken) {
+      const accessToken = await refreshAccessToken(refreshToken);
+      
+      const [walletData, spData, locId, shipData, skillData, journalData] = await Promise.all([
+        getCharacterWallet(charId, accessToken),
+        getCharacterSkills(charId, accessToken),
+        getCharacterLocation(charId, accessToken),
+        getCharacterShip(charId, accessToken),
+        getSkillQueue(charId, accessToken),
+        getWalletJournal(charId, accessToken)
+      ]);
+
+      walletBalance = walletData;
+      totalSP = spData || 0;
+      if (shipData) shipTypeId = shipData.ship_type_id;
+
+      const idsToResolve: number[] = [];
+      if (locId) idsToResolve.push(locId);
+      if (shipTypeId) idsToResolve.push(shipTypeId);
+      if (skillData?.skill_id) idsToResolve.push(skillData.skill_id);
+      journalData?.forEach((t: any) => {
+        if (t.first_party_id) idsToResolve.push(t.first_party_id);
+        if (t.second_party_id) idsToResolve.push(t.second_party_id);
+      });
+
+      const namesMap = await resolveNames(idsToResolve);
+
+      if (locId) locationName = namesMap[locId];
+      if (shipTypeId) shipName = namesMap[shipTypeId];
+      
+      if (skillData) {
+        activeSkillName = `${namesMap[skillData.skill_id] || 'Unknown Skill'} (${skillData.finished_level}级)`;
+        const start = new Date(skillData.start_date).getTime();
+        const end = new Date(skillData.finish_date).getTime();
+        const now = Date.now();
+        skillProgress = Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
+        skillEndTime = new Date(skillData.finish_date).toLocaleString();
       }
+
+      recentTransactions = journalData.map((t: any) => ({
+        ...t,
+        desc: namesMap[t.second_party_id] || 'Unknown',
+        partyName: t.amount > 0 ? namesMap[t.first_party_id] : namesMap[t.second_party_id]
+      }));
+
+    }
   } catch (e) {
-      console.error(e);
-      errorMsg = "ESI Sync Error";
+    console.error("ESI Error:", e);
   }
 
   return (
-    <div className="space-y-4">
-      
-      {/* 顶部面包屑区 */}
-      <div className="bg-transparent p-4 flex justify-between items-center mb-2">
-        <div>
-            <h1 className="text-2xl text-[#333] font-normal">
-                首页 <small className="text-xs text-gray-500 pl-1">仪表盘</small>
-            </h1>
-        </div>
-        <div className="text-xs text-gray-500 bg-[#d2d6de] px-2 py-1 rounded-sm">
-            Home &gt; Dashboard
-        </div>
+    <div className="space-y-6 animate-fade-in">
+      {/* 顶部标题 */}
+      <div className="flex items-baseline gap-2 mb-2">
+        <h1 className="text-2xl font-normal text-gray-800">指挥中心</h1>
+        <span className="text-sm text-gray-500"> / 仪表盘</span>
       </div>
 
-      <div className="px-4">
-          
-          {/* 第一行卡片：按照截图布局 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      {/* 1. 概览卡片 (Info Boxes) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <InfoBox color="bg-[#00c0ef]" icon="📍" label="当前位置" value={locationName} sub="Tranquility" />
+        
+        <div className="bg-white rounded-sm shadow-sm flex overflow-hidden group hover:shadow-md transition-shadow">
+            <div className="bg-[#00a65a] w-[90px] flex items-center justify-center p-2">
+                <img src={`https://images.evetech.net/types/${shipTypeId}/render?size=64`} alt={shipName} className="w-12 h-12 object-contain filter drop-shadow-lg group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="p-3 flex-1 flex flex-col justify-center min-w-0">
+                <span className="block text-sm uppercase text-gray-500 font-medium">驾驶舰船</span>
+                <span className="block text-lg font-bold text-gray-800 my-1 truncate" title={shipName}>{shipName}</span>
+            </div>
+        </div>
+        
+        <InfoBox color="bg-[#f39c12]" icon="💳" label="钱包余额" value={formatISK(walletBalance)} sub="ISK" />
+        <InfoBox color="bg-[#dd4b39]" icon="🎓" label="总技能点" value={formatNumber(totalSP)} sub="SP" />
+      </div>
+
+      {/* 🔥 新增：快捷入口 (Quick Links) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+         <Link href="/dashboard/assets" className="group block">
+            <div className="bg-white border-l-4 border-green-500 p-4 shadow-sm rounded-sm flex items-center justify-between hover:bg-green-50 transition-colors">
+                <div>
+                    <h3 className="font-bold text-gray-700 group-hover:text-green-700">📦 资产管理</h3>
+                    <p className="text-xs text-gray-500 mt-1">查看仓库物资与舰船</p>
+                </div>
+                <span className="text-2xl text-green-200 group-hover:text-green-500">➔</span>
+            </div>
+         </Link>
+
+         <Link href="/dashboard/market" className="group block">
+            <div className="bg-white border-l-4 border-blue-500 p-4 shadow-sm rounded-sm flex items-center justify-between hover:bg-blue-50 transition-colors">
+                <div>
+                    <h3 className="font-bold text-gray-700 group-hover:text-blue-700">⚖️ 市场与合同</h3>
+                    <p className="text-xs text-gray-500 mt-1">审计订单与交易合同</p>
+                </div>
+                <span className="text-2xl text-blue-200 group-hover:text-blue-500">➔</span>
+            </div>
+         </Link>
+
+         <Link href="/dashboard/contacts" className="group block">
+            <div className="bg-white border-l-4 border-purple-500 p-4 shadow-sm rounded-sm flex items-center justify-between hover:bg-purple-50 transition-colors">
+                <div>
+                    <h3 className="font-bold text-gray-700 group-hover:text-purple-700">👥 联系人</h3>
+                    <p className="text-xs text-gray-500 mt-1">查看好友与声望</p>
+                </div>
+                <span className="text-2xl text-purple-200 group-hover:text-purple-500">➔</span>
+            </div>
+         </Link>
+      </div>
+
+      {/* 下方功能区 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* 技能训练队列 */}
+        <div className="bg-white border-t-[3px] border-[#3c8dbc] shadow-sm rounded-sm p-4">
+            <div className="flex items-center justify-between mb-4 border-b pb-2">
+                <h3 className="text-lg font-light text-gray-700">🎓 技能训练中</h3>
+                <span className="text-xs text-blue-500 bg-blue-50 px-2 py-1 rounded">实时同步</span>
+            </div>
             
-            {/* 1. 在线玩家 (白色背景) */}
-            <div className="bg-white rounded-[3px] shadow-sm flex items-center p-2 min-h-[90px]">
-                 <div className="bg-[#222d32] text-white w-[80px] h-[80px] flex items-center justify-center text-4xl rounded-[3px]">
-                    <span className="text-3xl">🖥️</span>
-                 </div>
-                 <div className="pl-4">
-                    <span className="block text-[13px] uppercase text-[#333]">在线玩家</span>
-                    <span className="block text-xl font-bold text-[#333]">24655</span>
-                 </div>
+            <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center border">
+                    <span className="text-2xl">📚</span>
+                </div>
+                <div>
+                    <div className="font-bold text-gray-800">{activeSkillName}</div>
+                    <div className="text-xs text-gray-500">完成时间: {skillEndTime || '暂停中'}</div>
+                </div>
             </div>
 
-            {/* 2. 链接的角色 (绿色背景) */}
-            <InfoBox 
-                bgColor="bg-[#00a65a]" // 绿色
-                icon="🔑" 
-                label="链接的角色" 
-                value="1" 
-                fullColor={true} // 全色模式
-            />
-
-            {/* 3. 总角色 ISK (蓝色背景) */}
-            <InfoBox 
-                bgColor="bg-[#3c8dbc]" // 蓝色 (SeAT Blue)
-                icon="💵" 
-                label="总角色 ISK" 
-                value={formatISK(walletBalance)} 
-                fullColor={true}
-            />
-
-            {/* 4. Total Mined (紫色背景) */}
-            <InfoBox 
-                bgColor="bg-[#605ca8]" // 紫色
-                icon="💎" 
-                label="Total Mined ISK (this month)" 
-                value="0" 
-                fullColor={true}
-            />
-
-            {/* 5. 技能点 (黑色/白色背景混搭) */}
-            <div className="bg-white rounded-[3px] shadow-sm flex items-center min-h-[90px] overflow-hidden">
-                 <div className="bg-black text-white w-[90px] h-[90px] flex items-center justify-center text-4xl">
-                    🎓
-                 </div>
-                 <div className="pl-4 flex-1">
-                    <span className="block text-[13px] uppercase text-[#333]">总角色技能点</span>
-                    <span className="block text-xl font-bold text-[#333]">{formatNumber(totalSP)}</span>
-                 </div>
+            <div className="relative pt-1">
+                <div className="flex mb-2 items-center justify-between">
+                    <span className="text-xs font-semibold inline-block text-blue-600">进度</span>
+                    <span className="text-xs font-semibold inline-block text-blue-600">{skillProgress.toFixed(1)}%</span>
+                </div>
+                <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-100">
+                    <div style={{ width: `${skillProgress}%` }} className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-1000"></div>
+                </div>
             </div>
+        </div>
 
-             {/* 6. 击杀报告 (红色背景) */}
-             <InfoBox 
-                bgColor="bg-[#dd4b39]" // 红色
-                icon="🚀" 
-                label="总击杀报告数量 (this month)" 
-                value="15" 
-                fullColor={true}
-            />
-
-          </div>
-
-          {/* 第二行：图表区域 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* 左：同时在线人数 */}
-            <ChartBox title="同时在线人数" />
-
-            {/* 右：ESI 响应时间 */}
-            <ChartBox title="ESI 响应时间" />
-
-          </div>
-          
-          {/* 第三行：技能详情 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-              <ChartBox title={`${charName} 的技能`} subTitle="每级的技能" />
-              <ChartBox title={`${charName} 的技能`} subTitle="技能覆盖率 (百分比)" />
-          </div>
+        {/* 钱包审计日志 */}
+        <div className="bg-white border-t-[3px] border-[#f39c12] shadow-sm rounded-sm p-4">
+            <div className="flex items-center justify-between mb-4 border-b pb-2">
+                <h3 className="text-lg font-light text-gray-700">💸 最近交易 (RDA审计)</h3>
+            </div>
+            <div className="space-y-3">
+                {recentTransactions.length === 0 ? (
+                    <div className="text-gray-400 text-sm text-center py-4">无近期交易记录</div>
+                ) : (
+                    recentTransactions.map((t, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-sm border-b border-gray-50 pb-2 last:border-0">
+                            <div className="flex flex-col">
+                                <span className="font-semibold text-gray-700">{t.partyName || 'Market/System'}</span>
+                                <span className="text-xs text-gray-400">{new Date(t.date).toLocaleDateString()} · {t.ref_type}</span>
+                            </div>
+                            <span className={`font-mono font-bold ${t.amount > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {t.amount > 0 ? '+' : ''}{formatISK(t.amount)}
+                            </span>
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
 
       </div>
     </div>
   );
 }
 
-// AdminLTE 风格的 InfoBox
-// fullColor=true 时，整个卡片都是那个颜色 (如绿色、蓝色卡片)
-// fullColor=false 时，左边有色，右边白色 (如在线玩家卡片)
-function InfoBox({ bgColor, icon, label, value, fullColor = false }: any) {
-    if (fullColor) {
-        return (
-            <div className={`${bgColor} rounded-[3px] shadow-sm flex items-center min-h-[90px] text-white relative overflow-hidden`}>
-                <div className="w-[90px] h-full flex items-center justify-center text-4xl bg-black/20 absolute left-0 top-0 bottom-0">
-                    {icon}
-                </div>
-                <div className="pl-[100px] py-2 pr-2">
-                    <span className="block text-[13px] uppercase opacity-90">{label}</span>
-                    <span className="block text-xl font-bold mt-1">{value}</span>
-                </div>
-            </div>
-        )
-    }
-    // 默认样式 (左侧图标，右侧白底)
+function InfoBox({ color, icon, label, value, sub }: any) {
     return (
-        <div className="bg-white rounded-[3px] shadow-sm flex items-center min-h-[90px] overflow-hidden">
-             <div className={`${bgColor} text-white w-[90px] h-full min-h-[90px] flex items-center justify-center text-4xl`}>
+        <div className="bg-white rounded-sm shadow-sm flex overflow-hidden group hover:shadow-md transition-shadow">
+            <div className={`${color} text-white w-[90px] flex items-center justify-center text-4xl group-hover:scale-110 transition-transform duration-500`}>
                 {icon}
-             </div>
-             <div className="pl-4 flex-1">
-                <span className="block text-[13px] uppercase text-[#333]">{label}</span>
-                <span className="block text-xl font-bold text-[#333]">{value}</span>
-             </div>
-        </div>
-    )
-}
-
-// AdminLTE 风格的 Chart Box (白底，带蓝线)
-function ChartBox({ title, subTitle }: any) {
-    return (
-        <div className="bg-white border-t-[3px] border-[#d2d6de] shadow-sm rounded-t-[3px] rounded-b-[3px]">
-            <div className="p-3 border-b border-[#f4f4f4] flex justify-between items-center">
-                <h3 className="text-lg font-light text-[#444]">{title}</h3>
-                {/* 最小化/关闭按钮模拟 */}
-                <div className="flex gap-1">
-                    <div className="w-3 h-1 bg-[#d2d6de]"></div>
-                </div>
             </div>
-            <div className="p-4 relative">
-                {subTitle && <h4 className="text-right font-bold text-gray-600 mb-4">{subTitle}</h4>}
-                
-                {/* 模拟图表区域 */}
-                <div className="h-[200px] w-full bg-[#fbfbfb] border border-dashed border-[#d2d6de] flex items-center justify-center text-[#999]">
-                    [ Chart.js Canvas Placeholder ]
-                </div>
+            <div className="p-3 flex-1 flex flex-col justify-center min-w-0">
+                <span className="block text-sm uppercase text-gray-500 font-medium">{label}</span>
+                <span className="block text-lg font-bold text-gray-800 my-1 truncate" title={String(value)}>{value}</span>
+                {sub && <div className="text-xs text-gray-400 border-t pt-1 mt-1 truncate">{sub}</div>}
             </div>
         </div>
     )
