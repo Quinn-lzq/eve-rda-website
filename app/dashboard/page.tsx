@@ -1,6 +1,10 @@
 // app/dashboard/page.tsx
 import { createClient } from "@/utils/supabase/server";
-import { refreshAccessToken, getCharacterWallet, getCharacterSkills, formatISK, formatNumber } from "@/utils/eve-api";
+import { 
+  refreshAccessToken, getCharacterWallet, getCharacterSkills, 
+  getCharacterLocation, getCharacterShip, resolveNames,
+  formatISK, formatNumber 
+} from "@/utils/eve-api";
 
 export const dynamic = 'force-dynamic';
 
@@ -8,109 +12,189 @@ export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) return <div>Please Log In</div>;
-
-  const charName = user.user_metadata.character_name;
-  const charId = user.user_metadata.character_id;
-  const refreshToken = user.user_metadata.eve_refresh_token;
-
-  // 初始化数据
+  // 模拟数据 (防止没登录时报错，方便你看效果)
+  const charName = user?.user_metadata?.character_name || "Unknown Pilot";
+  const charId = user?.user_metadata?.character_id || 1;
   let walletBalance = 0;
   let totalSP = 0;
+  let shipName = "Capsule";
+  let locationName = "Jita";
   let errorMsg = "";
 
+  // 尝试获取真实数据
   try {
-    if (refreshToken) {
-      // 1. 先获取新的通行证 (Access Token)
-      const accessToken = await refreshAccessToken(refreshToken);
-      
-      // 2. 🚀 并行请求：同时查询钱包和技能点，速度翻倍！
-      const [walletData, spData] = await Promise.all([
-        getCharacterWallet(charId, accessToken),
-        getCharacterSkills(charId, accessToken)
-      ]);
-
-      walletBalance = walletData;
-      totalSP = spData || 0; // 如果 spData 是 null (比如没权限)，就显示 0
-    } else {
-      errorMsg = "令牌缺失";
-    }
+      if (user?.user_metadata?.eve_refresh_token) {
+          const token = await refreshAccessToken(user.user_metadata.eve_refresh_token);
+          const [w, s, l, sh] = await Promise.all([
+              getCharacterWallet(charId, token),
+              getCharacterSkills(charId, token),
+              getCharacterLocation(charId, token),
+              getCharacterShip(charId, token)
+          ]);
+          walletBalance = w;
+          totalSP = s || 0;
+          if (l || sh) {
+              const names = await resolveNames([l, sh?.ship_type_id].filter(Boolean));
+              locationName = names[l] || locationName;
+              shipName = names[sh?.ship_type_id] || shipName;
+          }
+      }
   } catch (e) {
-    console.error("ESI 数据同步失败:", e);
-    errorMsg = "数据同步失败";
+      console.error(e);
+      errorMsg = "ESI Sync Error";
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-baseline gap-2 mb-2">
-        <h1 className="text-2xl font-normal text-gray-800">首页</h1>
-        <span className="text-gray-500 text-sm">仪表盘</span>
-        {errorMsg && <span className="text-red-500 text-xs ml-2">⚠️ {errorMsg}</span>}
+    <div className="space-y-4">
+      
+      {/* 顶部面包屑区 */}
+      <div className="bg-transparent p-4 flex justify-between items-center mb-2">
+        <div>
+            <h1 className="text-2xl text-[#333] font-normal">
+                首页 <small className="text-xs text-gray-500 pl-1">仪表盘</small>
+            </h1>
+        </div>
+        <div className="text-xs text-gray-500 bg-[#d2d6de] px-2 py-1 rounded-sm">
+            Home &gt; Dashboard
+        </div>
       </div>
 
-      {/* 概览卡片 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <InfoBox color="bg-[#00c0ef]" icon="👥" label="在线玩家" value="36,254" sub="Tranquility Server" />
-        <InfoBox color="bg-[#00a65a]" icon="🔗" label="当前角色ID" value={charId} />
-        
-        {/* 真实的钱包数据 */}
-        <InfoBox 
-            color="bg-[#f39c12]" 
-            icon="💳" 
-            label="总角色 ISK" 
-            value={formatISK(walletBalance)} 
-            sub="实时余额"
-        />
-        
-        {/* 真实的技能点数据 */}
-        <InfoBox 
-            color="bg-[#dd4b39]" 
-            icon="🎓" 
-            label="总角色技能点" 
-            value={formatNumber(totalSP)} 
-            sub={totalSP > 0 ? "已注入技能点" : "权限不足或获取失败"} 
-        />
-      </div>
+      <div className="px-4">
+          
+          {/* 第一行卡片：按照截图布局 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            
+            {/* 1. 在线玩家 (白色背景) */}
+            <div className="bg-white rounded-[3px] shadow-sm flex items-center p-2 min-h-[90px]">
+                 <div className="bg-[#222d32] text-white w-[80px] h-[80px] flex items-center justify-center text-4xl rounded-[3px]">
+                    <span className="text-3xl">🖥️</span>
+                 </div>
+                 <div className="pl-4">
+                    <span className="block text-[13px] uppercase text-[#333]">在线玩家</span>
+                    <span className="block text-xl font-bold text-[#333]">24655</span>
+                 </div>
+            </div>
 
-      {/* 图表区域 (静态占位) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white border-t-[3px] border-[#00c0ef] shadow-sm rounded-sm">
-            <div className="p-3 border-b border-gray-100 flex justify-between">
-                <h3 className="text-base font-normal">同时在线人数</h3>
-            </div>
-            <div className="p-4 h-64 flex items-end gap-1 justify-center bg-gray-50">
-                {[30,45,60,50,70,85,60,40,30,25,30,40,55,70,80].map((h, i) => (
-                    <div key={i} className="flex-1 bg-[#3c8dbc]/60 hover:bg-[#3c8dbc] transition-all rounded-t" style={{height: `${h}%`}}></div>
-                ))}
-            </div>
-        </div>
+            {/* 2. 链接的角色 (绿色背景) */}
+            <InfoBox 
+                bgColor="bg-[#00a65a]" // 绿色
+                icon="🔑" 
+                label="链接的角色" 
+                value="1" 
+                fullColor={true} // 全色模式
+            />
 
-        <div className="bg-white border-t-[3px] border-[#dd4b39] shadow-sm rounded-sm">
-            <div className="p-3 border-b border-gray-100 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-black"></div>
-                <h3 className="text-base font-normal">{charName} 的技能</h3>
+            {/* 3. 总角色 ISK (蓝色背景) */}
+            <InfoBox 
+                bgColor="bg-[#3c8dbc]" // 蓝色 (SeAT Blue)
+                icon="💵" 
+                label="总角色 ISK" 
+                value={formatISK(walletBalance)} 
+                fullColor={true}
+            />
+
+            {/* 4. Total Mined (紫色背景) */}
+            <InfoBox 
+                bgColor="bg-[#605ca8]" // 紫色
+                icon="💎" 
+                label="Total Mined ISK (this month)" 
+                value="0" 
+                fullColor={true}
+            />
+
+            {/* 5. 技能点 (黑色/白色背景混搭) */}
+            <div className="bg-white rounded-[3px] shadow-sm flex items-center min-h-[90px] overflow-hidden">
+                 <div className="bg-black text-white w-[90px] h-[90px] flex items-center justify-center text-4xl">
+                    🎓
+                 </div>
+                 <div className="pl-4 flex-1">
+                    <span className="block text-[13px] uppercase text-[#333]">总角色技能点</span>
+                    <span className="block text-xl font-bold text-[#333]">{formatNumber(totalSP)}</span>
+                 </div>
             </div>
-            <div className="p-4 h-64 flex items-center justify-center bg-gray-50 text-gray-400">
-                 图表功能开发中...
-            </div>
-        </div>
+
+             {/* 6. 击杀报告 (红色背景) */}
+             <InfoBox 
+                bgColor="bg-[#dd4b39]" // 红色
+                icon="🚀" 
+                label="总击杀报告数量 (this month)" 
+                value="15" 
+                fullColor={true}
+            />
+
+          </div>
+
+          {/* 第二行：图表区域 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* 左：同时在线人数 */}
+            <ChartBox title="同时在线人数" />
+
+            {/* 右：ESI 响应时间 */}
+            <ChartBox title="ESI 响应时间" />
+
+          </div>
+          
+          {/* 第三行：技能详情 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+              <ChartBox title={`${charName} 的技能`} subTitle="每级的技能" />
+              <ChartBox title={`${charName} 的技能`} subTitle="技能覆盖率 (百分比)" />
+          </div>
+
       </div>
     </div>
   );
 }
 
-function InfoBox({ color, icon, label, value, sub }: any) {
-    return (
-        <div className="bg-white rounded-sm shadow-sm flex overflow-hidden group hover:shadow-md transition-shadow">
-            <div className={`${color} text-white w-[90px] flex items-center justify-center text-4xl group-hover:scale-110 transition-transform duration-500`}>
-                {icon}
+// AdminLTE 风格的 InfoBox
+// fullColor=true 时，整个卡片都是那个颜色 (如绿色、蓝色卡片)
+// fullColor=false 时，左边有色，右边白色 (如在线玩家卡片)
+function InfoBox({ bgColor, icon, label, value, fullColor = false }: any) {
+    if (fullColor) {
+        return (
+            <div className={`${bgColor} rounded-[3px] shadow-sm flex items-center min-h-[90px] text-white relative overflow-hidden`}>
+                <div className="w-[90px] h-full flex items-center justify-center text-4xl bg-black/20 absolute left-0 top-0 bottom-0">
+                    {icon}
+                </div>
+                <div className="pl-[100px] py-2 pr-2">
+                    <span className="block text-[13px] uppercase opacity-90">{label}</span>
+                    <span className="block text-xl font-bold mt-1">{value}</span>
+                </div>
             </div>
-            <div className="p-3 flex-1 flex flex-col justify-center min-w-0">
-                <span className="block text-sm uppercase text-gray-500 font-medium">{label}</span>
-                <span className="block text-lg font-bold text-gray-800 my-1 truncate" title={String(value)}>
-                    {value}
-                </span>
-                {sub && <div className="text-xs text-gray-400 border-t pt-1 mt-1 truncate">{sub}</div>}
+        )
+    }
+    // 默认样式 (左侧图标，右侧白底)
+    return (
+        <div className="bg-white rounded-[3px] shadow-sm flex items-center min-h-[90px] overflow-hidden">
+             <div className={`${bgColor} text-white w-[90px] h-full min-h-[90px] flex items-center justify-center text-4xl`}>
+                {icon}
+             </div>
+             <div className="pl-4 flex-1">
+                <span className="block text-[13px] uppercase text-[#333]">{label}</span>
+                <span className="block text-xl font-bold text-[#333]">{value}</span>
+             </div>
+        </div>
+    )
+}
+
+// AdminLTE 风格的 Chart Box (白底，带蓝线)
+function ChartBox({ title, subTitle }: any) {
+    return (
+        <div className="bg-white border-t-[3px] border-[#d2d6de] shadow-sm rounded-t-[3px] rounded-b-[3px]">
+            <div className="p-3 border-b border-[#f4f4f4] flex justify-between items-center">
+                <h3 className="text-lg font-light text-[#444]">{title}</h3>
+                {/* 最小化/关闭按钮模拟 */}
+                <div className="flex gap-1">
+                    <div className="w-3 h-1 bg-[#d2d6de]"></div>
+                </div>
+            </div>
+            <div className="p-4 relative">
+                {subTitle && <h4 className="text-right font-bold text-gray-600 mb-4">{subTitle}</h4>}
+                
+                {/* 模拟图表区域 */}
+                <div className="h-[200px] w-full bg-[#fbfbfb] border border-dashed border-[#d2d6de] flex items-center justify-center text-[#999]">
+                    [ Chart.js Canvas Placeholder ]
+                </div>
             </div>
         </div>
     )

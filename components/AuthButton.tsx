@@ -5,7 +5,24 @@ import { useState } from 'react';
 import { generateCodeChallenge, generateCodeVerifier, generateRandomString } from '@/utils/pkce-helpers'; 
 import { createClient } from '@/utils/supabase/client';
 
-const EVE_SCOPES = 'esi-skills.read_skills.v1 esi-wallet.read_character_wallet.v1 esi-assets.read_assets.v1 esi-location.read_location.v1 esi-location.read_ship_type.v1';
+// components/AuthButton.tsx
+
+// 替换原来的 EVE_SCOPES，加入更多有用的权限
+const EVE_SCOPES =
+ [
+    'publicData',
+    'esi-skills.read_skills.v1',
+    'esi-skills.read_skillqueue.v1',
+    'esi-wallet.read_character_wallet.v1',
+    'esi-assets.read_assets.v1',
+    'esi-location.read_location.v1',
+    'esi-location.read_ship_type.v1',
+    'esi-location.read_online.v1',
+    'esi-characters.read_corporation_roles.v1',
+    // 如果你是要做军团审计，建议加上 contracts 和 market
+    'esi-markets.read_character_orders.v1',
+    'esi-contracts.read_character_contracts.v1'
+].join(' '); // 自动用空格连接
 
 // 接收一个 size 属性，决定按钮大小
 export default function AuthButton({ size = 'normal', isLogged = false }: { size?: 'normal' | 'large', isLogged?: boolean }) {
@@ -47,9 +64,10 @@ export default function AuthButton({ size = 'normal', isLogged = false }: { size
 
     const handleSignOut = async () => {
         setIsLoading(true);
-        await supabase.auth.signOut();
-        router.refresh(); // 刷新页面以更新状态
-        setIsLoading(false);
+        // 不再使用 supabase.auth.signOut() 和 router.refresh()
+        // 而是直接跳转到我们刚写的服务端登出路由
+        // 这能保证 100% 清除 Cookie 并刷新页面
+        window.location.href = '/api/auth/signout';
     };
 
     // 如果已登录，显示注销按钮
